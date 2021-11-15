@@ -197,6 +197,7 @@
  */
 
 
+
 /**
  * Identify the syntax and semantics of the bitstream.
  * The principle is roughly:

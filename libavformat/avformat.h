@@ -1311,6 +1311,9 @@ enum AVDurationEstimationMethod {
 
 typedef struct AVFormatInternal AVFormatInternal;
 
+
+
+
 /**
  * Format I/O context.
  * New fields can be added to the end with minor version bumps.
@@ -1926,6 +1929,23 @@ typedef struct AVFormatContext {
      * - decoding: set by user
      */
     int max_streams;
+
+    /**
+     * The record rtsp cmd control type.  add by leno 2021.05.31
+     * - encoding: unused
+     * - decoding: set by user
+     */
+    int user_cmd_type;   // 0--none,1--front fast,2--front slow,3--back fast, 4--back slow
+
+    /**
+     * The record rtsp cmd control value.  add by leno 2021.05.31
+     * - encoding: unused
+     * - decoding: set by user
+     */
+    float user_cmd_value;
+
+    int prevent_reset;
+
 } AVFormatContext;
 
 #if FF_API_FORMAT_GET_SET

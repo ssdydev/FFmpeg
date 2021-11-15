@@ -524,6 +524,7 @@ static int rtsp_read_play(AVFormatContext *s)
                 ff_rtp_send_punch_packets(rtsp_st->rtp_handle);
         }
     }
+
     if (!(rt->server_type == RTSP_SERVER_REAL && rt->need_subscription)) {
         if (rt->transport == RTSP_TRANSPORT_RTP) {
             for (i = 0; i < rt->nb_rtsp_streams; i++) {
@@ -531,23 +532,46 @@ static int rtsp_read_play(AVFormatContext *s)
                 RTPDemuxContext *rtpctx = rtsp_st->transport_priv;
                 if (!rtpctx)
                     continue;
-                ff_rtp_reset_packet_queue(rtpctx);
-                rtpctx->last_rtcp_ntp_time  = AV_NOPTS_VALUE;
-                rtpctx->first_rtcp_ntp_time = AV_NOPTS_VALUE;
-                rtpctx->base_timestamp      = 0;
-                rtpctx->timestamp           = 0;
-                rtpctx->unwrapped_timestamp = 0;
-                rtpctx->rtcp_ts_offset      = 0;
+
+                if (s->prevent_reset != 1) {
+                  av_log(s, AV_LOG_DEBUG, "RESET in rtsp_read_play", NULL);
+
+                  ff_rtp_reset_packet_queue(rtpctx);
+                  rtpctx->base_timestamp = 0;
+                  rtpctx->last_rtcp_ntp_time  = AV_NOPTS_VALUE;
+                  rtpctx->first_rtcp_ntp_time = AV_NOPTS_VALUE;
+                  rtpctx->timestamp           = 0;
+                  rtpctx->unwrapped_timestamp = 0;
+                  rtpctx->rtcp_ts_offset      = 0;
+                } else {
+                  av_log(s, AV_LOG_DEBUG, "RESET prevented in rtsp_read_play", NULL);
+                }
             }
         }
+
         if (rt->state == RTSP_STATE_PAUSED) {
             cmd[0] = 0;
         } else {
-            snprintf(cmd, sizeof(cmd),
-                     "Range: npt=%"PRId64".%03"PRId64"-\r\n",
-                     rt->seek_timestamp / AV_TIME_BASE,
-                     rt->seek_timestamp / (AV_TIME_BASE / 1000) % 1000);
+          if (s->user_cmd_type == 0) {
+              snprintf(cmd, sizeof(cmd),
+                    "Range: npt=%"PRId64".%03"PRId64"-\r\n",
+                    rt->seek_timestamp / AV_TIME_BASE,
+                    rt->seek_timestamp / (AV_TIME_BASE / 1000) % 1000);
+          } else {
+              snprintf(cmd, sizeof(cmd),
+                    "Scale: %f\r\n",
+                  s->user_cmd_value);
+              av_log(s, AV_LOG_DEBUG, "Send SCALE COMMAND: %s", cmd);
+
+              ff_rtsp_send_cmd(s, "PLAY", rt->control_uri, cmd, reply, NULL);
+              if (reply->status_code != RTSP_STATUS_OK) {
+                  return ff_rtsp_averror(reply->status_code, -1);
+              }
+
+              return 0;
+          }
         }
+
         ff_rtsp_send_cmd(s, "PLAY", rt->control_uri, cmd, reply, NULL);
         if (reply->status_code != RTSP_STATUS_OK) {
             return ff_rtsp_averror(reply->status_code, -1);
@@ -578,9 +602,21 @@ static int rtsp_read_pause(AVFormatContext *s)
     RTSPState *rt = s->priv_data;
     RTSPMessageHeader reply1, *reply = &reply1;
 
-    if (rt->state != RTSP_STATE_STREAMING)
-        return 0;
-    else if (!(rt->server_type == RTSP_SERVER_REAL && rt->need_subscription)) {
+    if (rt->state != RTSP_STATE_STREAMING) {
+      if (rt->state == RTSP_STATE_PAUSED) {
+        if (rt->get_parameter_supported) {
+          ff_rtsp_send_cmd(s, "GET_PARAMETER", rt->control_uri, NULL, reply, NULL);
+        } else {
+          ff_rtsp_send_cmd(s, "OPTIONS", rt->control_uri, NULL, reply, NULL);
+        }
+
+        if (reply->status_code != RTSP_STATUS_OK) {
+            return ff_rtsp_averror(reply->status_code, -1);
+        }
+      }
+
+      return 0;
+    } else if (!(rt->server_type == RTSP_SERVER_REAL && rt->need_subscription)) {
         ff_rtsp_send_cmd(s, "PAUSE", rt->control_uri, NULL, reply, NULL);
         if (reply->status_code != RTSP_STATUS_OK) {
             return ff_rtsp_averror(reply->status_code, -1);
